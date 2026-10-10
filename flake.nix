@@ -3,7 +3,6 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    self.submodules = true;
   };
 
   outputs = { nixpkgs, ... }:

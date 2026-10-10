@@ -1,0 +1,47 @@
+name: GTK WASIX libs
+
+# Spike: build the GTK closure with the WASIX toolchain (wasixcc + WASIX
+# sysroot). Plain wasi-libc failed (libffi/emscripten, epoll-shim/signals), so
+# this exercises the wasinix-wrapped recipes instead.
+#
+# Phase 1: libffi, pcre2, expat, wayland, wayland-protocols, glib.
+# Remove/replace once wwn-gtk owns its own CI lane.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "gtk/**"
+
+permissions:
+  contents: read
+
+jobs:
+  build-libs:
+    name: wasix ${{ matrix.package }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - libffi
+          - pcre2
+          - expat
+          - wayland
+          - wayland-protocols
+          - glib
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v19
+      - name: Build ${{ matrix.package }} with wasixcc
+        run: |
+          set -euo pipefail
+          nix build --print-build-logs --show-trace \
+            ".#wasix.libraries.exnrefEh.${{ matrix.package }}" \
+            -o "result-${{ matrix.package }}"
+      - name: Inspect output
+        run: |
+          # `find | head` under pipefail fails with SIGPIPE; do not fail here.
+          find "result-${{ matrix.package }}" -maxdepth 3 | head -40 || true

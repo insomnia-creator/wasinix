@@ -360,7 +360,10 @@ let
     ncurses = pkgsCross.callPackage ./ncurses {
       inherit nixpkgs toolchain;
     };
-  });
+  }
+  // (import ./gtk.nix {
+    inherit pkgs pkgsCross toolchain mkUpstreamLibrary self;
+  }));
   phpLibraries =
     if includePhp then
       import ./php {
