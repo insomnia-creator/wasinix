@@ -611,6 +611,9 @@ EOF
       libjpeg = self.libjpeg;
       libtiff = self.libtiff;
       libxml2 = self.libxml2;
+      # nativeBuildInputs are not spliced to the build machine for this
+      # package; use the x86_64 gobject-introspection (introspection is off).
+      gobject-introspection = pkgsCross.buildPackages.gobject-introspection;
     }).overrideAttrs (old: {
       doCheck = false;
       # Drop inputs we do not use: gstreamer media, the X11 stack, Wayland
