@@ -572,4 +572,101 @@ EOF
       '';
     };
   };
+
+  # libepoxy is pulled in by GTK4's GSK GL/NGL renderer even though we only
+  # intend to use GSK_RENDERER=cairo. Build it without GLX/EGL/X11: it vendors
+  # its own Khronos headers and uses wasix's dlopen stub for the runtime GL.
+  libepoxy = mkUpstreamLibrary {
+    package = pkgsCross.libepoxy.override {
+      x11Support = false;
+    };
+    doCheck = false;
+  };
+
+  # GTK4, Wayland-only, cairo first. There is no meson option to drop the
+  # GL/NGL renderer, so libepoxy is still required; GSK_RENDERER=cairo is a
+  # runtime choice.
+  gtk4 = mkUpstreamLibrary {
+    package = (pkgsCross.gtk4.override {
+      x11Support = false;
+      waylandSupport = true;
+      vulkanSupport = false;
+      trackerSupport = false;
+      cupsSupport = false;
+      broadwaySupport = false;
+      xineramaSupport = false;
+      compileSchemas = false;
+      glib = self.glib;
+      cairo = self.cairo;
+      pango = self.pango;
+      gdk-pixbuf = self.gdk-pixbuf;
+      graphene = self.graphene;
+      fribidi = self.fribidi;
+      harfbuzz = self.harfbuzz;
+      libepoxy = self.libepoxy;
+      libxkbcommon = self.libxkbcommon;
+      wayland = self.wayland;
+      wayland-protocols = self.wayland-protocols;
+      libpng = self.libpng;
+      libjpeg = self.libjpeg;
+      libtiff = self.libtiff;
+      libxml2 = self.libxml2;
+    }).overrideAttrs (old: {
+      doCheck = false;
+      # Drop inputs we do not use: gstreamer media, the X11 stack, Wayland
+      # libGL, and the gdk-pixbuf loaders (librsvg/isocodes/libtiff/libjpeg).
+      # Re-add the closure libepoxy (self), not the plain wasm one.
+      buildInputs = builtins.filter (
+        input:
+        let
+          name = input.pname or input.name or "";
+        in
+        !(builtins.elem name [
+          "gst-plugins-base"
+          "gst-plugins-bad"
+          "libice"
+          "libsm"
+          "libxcursor"
+          "libxdamage"
+          "libxi"
+          "libxrandr"
+          "libxrender"
+          "librsvg"
+          "isocodes"
+          "libtiff"
+          "libjpeg"
+          "libGL"
+          "libglvnd"
+          "libepoxy"
+        ])
+      ) ((old.buildInputs or [ ]) ++ [ self.libepoxy ]);
+      mesonFlags = [
+        "-Dx11-backend=false"
+        "-Dwayland-backend=true"
+        "-Dbroadway-backend=false"
+        "-Dwin32-backend=false"
+        "-Dmacos-backend=false"
+        "-Dandroid-backend=false"
+        "-Dmedia-gstreamer=disabled"
+        "-Dprint-cups=disabled"
+        "-Dprint-cpdb=disabled"
+        "-Dvulkan=disabled"
+        "-Dcloudproviders=disabled"
+        "-Dsysprof=disabled"
+        "-Dtracker=disabled"
+        "-Dcolord=disabled"
+        "-Df16c=disabled"
+        "-Daccesskit=disabled"
+        "-Dintrospection=disabled"
+        "-Ddocumentation=false"
+        "-Dman-pages=false"
+        "-Dbuild-demos=false"
+        "-Dbuild-testsuite=false"
+        "-Dbuild-examples=false"
+        "-Dbuild-tests=false"
+        "-Ddefault_library=static"
+      ];
+    });
+    doCheck = false;
+  };
 }
