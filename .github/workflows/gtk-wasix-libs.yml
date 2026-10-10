@@ -25,22 +25,25 @@ jobs:
       fail-fast: false
       matrix:
         package:
-          - libffi
-          - pcre2
-          - expat
-          - wayland
-          - wayland-protocols
-          - glib
-          - pixman
-          - fribidi
-          - harfbuzz
-          - fontconfig
-          - cairo
-          - pango
-          - gdk-pixbuf
-          - graphene
-          - libxkbcommon
-          - libepoxy
+          # Phase 1 + Phase 2 + libepoxy are green. Trimmed to gtk4 while
+          # iterating on the last node so each run is a single job. Restore
+          # the full list before merging:
+          # - libffi
+          # - pcre2
+          # - expat
+          # - wayland
+          # - wayland-protocols
+          # - glib
+          # - pixman
+          # - fribidi
+          # - harfbuzz
+          # - fontconfig
+          # - cairo
+          # - pango
+          # - gdk-pixbuf
+          # - graphene
+          # - libxkbcommon
+          # - libepoxy
           - gtk4
     steps:
       - uses: actions/checkout@v4

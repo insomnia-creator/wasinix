@@ -611,6 +611,11 @@ EOF
       libjpeg = self.libjpeg;
       libtiff = self.libtiff;
       libxml2 = self.libxml2;
+      # librsvg pulls the plain wasm cairo, which cannot even evaluate on
+      # wasi. We do not need SVG pixbuf loading for first bring-up.
+      librsvg = pkgsCross.runCommand "librsvg-wasix-stub" { } ''
+        mkdir -p $out/include/librsvg-2.0 $out/lib/pkgconfig
+      '';
       # nativeBuildInputs are not spliced to the build machine here, and the
       # cross gobject-introspection pulls the target gobject-introspection,
       # which cannot even evaluate on wasi. Introspection is disabled, so a
