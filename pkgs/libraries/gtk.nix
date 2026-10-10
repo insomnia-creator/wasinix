@@ -712,6 +712,15 @@ EOF
         "-Ddefault_library=static"
       ];
     });
+    postPatch = ''
+      # rsvg_dep is defined but never used; the old-version fallback is
+      # required, so meson tries to download the librsvg wrap. Make it
+      # optional so configure succeeds without librsvg.
+      substituteInPlace meson.build \
+        --replace-fail \
+          "dependency('librsvg-2.0', version: ['>= 2.40.23', '< 2.41'])" \
+          "dependency('librsvg-2.0', version: ['>= 2.40.23', '< 2.41'], required: false)"
+    '';
     doCheck = false;
   };
 }
