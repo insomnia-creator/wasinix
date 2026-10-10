@@ -626,6 +626,14 @@ EOF
           mkdir -p $out
         '';
       };
+      # Runtime data packages that drag in a plain wasm glib (and thus the
+      # plain pcre2/zlib). Stub them for first bring-up.
+      shared-mime-info = pkgsCross.runCommand "shared-mime-info-wasix-stub" { } ''
+        mkdir -p $out/share
+      '';
+      gsettings-desktop-schemas = pkgsCross.runCommand "gsettings-desktop-schemas-wasix-stub" { } ''
+        mkdir -p $out/share/glib-2.0/schemas
+      '';
       # nativeBuildInputs are not spliced to the build machine here, and the
       # cross gobject-introspection pulls the target gobject-introspection,
       # which cannot even evaluate on wasi. Introspection is disabled, so a
