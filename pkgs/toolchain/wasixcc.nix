@@ -26,6 +26,11 @@ let
     inherit version src;
     cargoLock.lockFile = "${src}/Cargo.lock";
 
+    # Capture `clang --version` output instead of inheriting stdout; autoconf
+    # and meson close the read end of version-probe pipes early, which makes
+    # clang die with SIGPIPE. See the patch header.
+    patches = [ ./wasixcc-version-sigpipe.patch ];
+
     doCheck = true;
 
     installPhase = ''

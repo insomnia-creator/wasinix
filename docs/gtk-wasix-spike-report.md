@@ -151,6 +151,43 @@ Next actions:
 3. `Wawona/wwn-gtk` still needs to be created by an org admin (only
    `insomnia-creator/wwn-gtk` exists).
 
+## Phase 2 status (2026-10-10)
+
+Added pixman, fribidi, harfbuzz, fontconfig, cairo, pango, gdk-pixbuf,
+graphene, libxkbcommon to `pkgs/libraries/gtk.nix` and the CI matrix.
+**All 15 nodes green.**
+
+Key fixes beyond Phase 1:
+
+- **wasixcc `--version` SIGPIPE** (root cause of the cairo/pango flake):
+  `wasixccenv` let the compiler inherit stdout, so autoconf/meson version
+  probes that close the read end killed clang with SIGPIPE. Patched in
+  `pkgs/toolchain/wasixcc-version-sigpipe.patch` to capture and re-emit.
+- **cairo**: nixpkgs' cross-file throws for wasi, so supply `mesonFlags`
+  directly; `-Dlzo=disabled` (the meson hook forces `auto_features=enabled`);
+  `HAVE_CTIME_R=1` (the `cc.has_function` probe is fooled by wasi's
+  `__REDIR`); build static (the shared link trips wasm-ld over
+  `--start-group`/soname); add fontconfig to the `cairo-ft` link deps; mark
+  the empty `devdoc` output.
+- **pango**: `makeFontsConf` defaulted to the plain wasm fontconfig, pulling
+  the plain freetype and its wasi-unbuildable brotli CLI; point it at the
+  closure fontconfig. Replaced `libintl` (the wasm gettext drags in a target
+  bash that does not configure) with an inert stub. Pinned every meson
+  feature (`build-testsuite`, `-Ddefault_library=static`); skipped the
+  false-negative `cairo-ft` FontConfig link probe, the C++ CLI utils, and
+  the empty `bin` output.
+- **wasm-ld** has no `--start-group`/`--end-group`; strip them from
+  `build.ninja` in `preBuild` where meson emits them (cairo, pango,
+  harfbuzz, libxkbcommon).
+- pixman/fribidi static libs and CLI drops, gdk-pixbuf/graphene
+  `make-shell-wrapper-hook` filter, empty `doc`/`devdoc` outputs marked.
+
+CI: added a Nix store cache (`nix-community/cache-nix-action`) and a
+one-shot retry for the wasixcc flake.
+
+Commits: Phase 1 is one squashed commit `02d71b1`; Phase 2 is one squashed
+commit on top. Deferred to the GPU phase: `libepoxy` (no EGL/GL on wasm).
+
 ## Repo pointers
 
 - Spike: `insomnia-creator/wasinix` branch `gtk/wasix-spike`

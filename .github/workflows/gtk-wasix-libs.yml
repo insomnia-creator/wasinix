@@ -31,16 +31,36 @@ jobs:
           - wayland
           - wayland-protocols
           - glib
+          - pixman
+          - fribidi
+          - harfbuzz
+          - fontconfig
+          - cairo
+          - pango
+          - gdk-pixbuf
+          - graphene
+          - libxkbcommon
     steps:
       - uses: actions/checkout@v4
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@v19
+      - name: Cache the Nix store
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'pkgs/**/*.nix') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 5G
       - name: Build ${{ matrix.package }} with wasixcc
         run: |
           set -euo pipefail
+          # The wasixcc wrapper occasionally dies with SIGPIPE on
+          # `clang --version`; retry once.
           nix build --print-build-logs --show-trace \
             ".#wasix.libraries.exnrefEh.${{ matrix.package }}" \
-            -o "result-${{ matrix.package }}"
+            -o "result-${{ matrix.package }}" \
+            || nix build --print-build-logs --show-trace \
+              ".#wasix.libraries.exnrefEh.${{ matrix.package }}" \
+              -o "result-${{ matrix.package }}"
       - name: Inspect output
         run: |
           # `find | head` under pipefail fails with SIGPIPE; do not fail here.

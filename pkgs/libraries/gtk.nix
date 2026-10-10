@@ -22,6 +22,17 @@ let
     rev = "09cbf7d66d232a01dbb0c88fd5ae65fa9c15f7c7";
     hash = "sha256-6xayw5iBCCXxTM37+1RmFdxptvgcrKlxOqjaMyBb16I=";
   };
+
+  # Build-machine compiler description for meson, so packages that need a
+  # native generator compilable for x86_64 (e.g. harfbuzz) can find one
+  # while the host compiler stays wasixcc.
+  nativeFile = pkgs.writeText "wasix-native.ini" ''
+    [binaries]
+    c = '${pkgs.buildPackages.stdenv.cc}/bin/cc'
+    cpp = '${pkgs.buildPackages.stdenv.cc}/bin/c++'
+    ar = '${pkgs.buildPackages.stdenv.cc}/bin/ar'
+    strip = '${pkgs.buildPackages.stdenv.cc}/bin/strip'
+  '';
 in
 {
   libffi = mkUpstreamLibrary {
@@ -297,6 +308,268 @@ EOF
         "-Dlibmount=disabled"
         "-Dsysprof=disabled"
       ];
+    };
+  };
+
+  # ---- Phase 2: 2D / text / toolkit substrate ----
+
+  pixman = mkUpstreamLibrary {
+    package = pkgsCross.pixman.override {
+      libpng = self.libpng;
+    };
+    doCheck = false;
+    preBuild = ''
+      find . -name build.ninja -exec sed -i 's/--start-group//g; s/--end-group//g' {} +
+    '';
+    overrideAttrs = _old: {
+      mesonFlags = [ "-Dtests=disabled" "-Ddemos=disabled" "-Dgtk=disabled" "-Ddefault_library=static" ];
+    };
+  };
+
+  fribidi = mkUpstreamLibrary {
+    package = pkgsCross.fribidi;
+    doCheck = false;
+    postPatch = ''
+      # The bundled getopt CLI conflicts with libc getopt on wasm.
+      sed -i "/subdir('bin')/d" meson.build
+    '';
+    preBuild = ''
+      find . -name build.ninja -exec sed -i 's/--start-group//g; s/--end-group//g' {} +
+    '';
+    overrideAttrs = _old: {
+      mesonFlags = [ "-Ddocs=false" "-Dtests=false" "-Ddefault_library=static" ];
+      postFixup = ''
+        mkdir -p "$devdoc" 2>/dev/null || true
+        : > "$devdoc/.keep" 2>/dev/null || true
+      '';
+    };
+  };
+
+  harfbuzz = mkUpstreamLibrary {
+    package = pkgsCross.harfbuzz.override {
+      freetype = self.freetype;
+      glib = self.glib;
+      withGraphite2 = false;
+      withIcu = false;
+      withIntrospection = false;
+    };
+    doCheck = false;
+    postPatch = ''
+      # wasix++ rejects PIC with -fno-exceptions on the EH profile.
+      find . -name meson.build -exec sed -i 's/-fno-exceptions//g' {} +
+    '';
+    preBuild = ''
+      find . -name build.ninja -exec sed -i 's/-fno-exceptions//g; s/--start-group//g; s/--end-group//g' {} +
+    '';
+    overrideAttrs = old: {
+      mesonFlags = (old.mesonFlags or [ ]) ++ [ "--native-file=${nativeFile}" ];
+    };
+  };
+
+  fontconfig = mkUpstreamLibrary {
+    package = pkgsCross.fontconfig.override {
+      expat = self.expat;
+      freetype = self.freetype;
+    };
+    doCheck = false;
+    preConfigure = ''
+      cat > "$PWD/wasix-fcntl.h" <<'EOF'
+      #include <fcntl.h>
+      #ifndef F_GETLK
+      #define F_GETLK 5
+      #define F_SETLK 6
+      #define F_SETLKW 7
+      #define F_RDLCK 0
+      #define F_WRLCK 1
+      #define F_UNLCK 2
+      #endif
+      EOF
+      export CFLAGS="-include $PWD/wasix-fcntl.h ''${CFLAGS:-}"
+    '';
+  };
+
+  cairo = mkUpstreamLibrary {
+    package = pkgsCross.cairo.override {
+      fontconfig = self.fontconfig;
+      freetype = self.freetype;
+      glib = self.glib;
+      libpng = self.libpng;
+      pixman = self.pixman;
+      zlib = self.zlib;
+      x11Support = false;
+      xcbSupport = false;
+      gobjectSupport = true;
+      lzo = null;
+    };
+    doCheck = false;
+    postPatch = ''
+      # meson's cc.has_function('ctime_r') probe is fooled by wasi's
+      # __REDIR and reports no, but the wasix sysroot declares and
+      # provides ctime_r. Force it on so cairo-ps-surface.c does not
+      # define its own conflicting static ctime_r.
+      sed -i "/configure_file(output: 'config.h', configuration: conf)/i conf.set('HAVE_CTIME_R', 1)" meson.build
+      # cairo-ft.pc only carries fontconfig as a compile dependency, so a
+      # static consumer (pango's cairo-ft probe) fails to resolve Fc*.
+      substituteInPlace meson.build \
+        --replace-fail "'deps': [freetype_dep]," "'deps': [freetype_dep, fontconfig_dep],"
+    '';
+    preBuild = ''
+      # wasm-ld has no --start-group; meson wraps -lpthread/-lm in it.
+      find . -name build.ninja -exec sed -i \
+        's/-Wl,--start-group//g; s/-Wl,--end-group//g; s/--start-group//g; s/--end-group//g' {} +
+    '';
+    overrideAttrs = _old: {
+      # nixpkgs' cairo cross-file evaluates a kernel map that throws for wasi;
+      # supply the flags directly instead of forcing old.mesonFlags.
+      mesonFlags = [
+        "-Dgtk_doc=false"
+        "-Dsymbol-lookup=disabled"
+        "-Dspectre=disabled"
+        "-Dglib=enabled"
+        "-Dtests=disabled"
+        "-Dxlib=disabled"
+        "-Dxcb=disabled"
+        # nixpkgs' meson hook forces -Dauto_features=enabled, so optional
+        # deps become required. lzo is unused here (lzo = null).
+        "-Dlzo=disabled"
+        # Build a static archive. The shared link trips wasm-ld over
+        # --start-group and the -soname value being read as an input.
+        "-Ddefault_library=static"
+      ];
+      # Docs are disabled, so the devdoc output dir is empty.
+      postFixup = ''
+        mkdir -p "$devdoc" 2>/dev/null || true
+        : > "$devdoc/.keep" 2>/dev/null || true
+      '';
+    };
+  };
+
+  pango = mkUpstreamLibrary {
+    package = pkgsCross.pango.override {
+      cairo = self.cairo;
+      fribidi = self.fribidi;
+      glib = self.glib;
+      harfbuzz = self.harfbuzz;
+      withIntrospection = false;
+      x11Support = false;
+      # pango defaults makeFontsConf's fontconfig to the plain wasm
+      # fontconfig, which drags in the plain freetype and its brotli
+      # dependency (whose CLI does not build on wasm).  Point it at the
+      # closure's fontconfig instead.
+      makeFontsConf =
+        args: pkgsCross.makeFontsConf ({ fontconfig = self.fontconfig; } // args);
+      # pango's meson.build does not use libintl at all; nixpkgs only
+      # propagates it. The real wasm gettext pulls a target bash that does
+      # not configure cleanly, so use an inert stub to keep the build going.
+      libintl = pkgsCross.runCommand "libintl-wasix-stub" { } ''
+        mkdir -p $out/include $out/lib
+      '';
+    };
+    doCheck = false;
+    postPatch = ''
+      # cairo is static here, so meson's cairo-ft dependency does not
+      # propagate cairo's private libs and this probe fails on Fc* symbols
+      # even though cairo was built with Fontconfig. Skip the false
+      # negative.
+      substituteInPlace meson.build \
+        --replace-fail \
+          "error('@0@ does not have the required FontConfig support'.format(b[0]))" \
+          "message('assuming cairo-ft has the required FontConfig support')"
+      # The CLI utils (pango-view/list/segmentation) are C++ programs that
+      # link the C++ harfbuzz static archive and need the C++ runtime. We
+      # do not need them for the GTK closure.
+      substituteInPlace meson.build \
+        --replace-fail "subdir('utils')" "# utils skipped: C++ CLI tools not needed"
+    '';
+    preBuild = ''
+      # wasm-ld has no --start-group/--end-group.
+      find . -name build.ninja -exec sed -i \
+        's/-Wl,--start-group//g; s/-Wl,--end-group//g; s/--start-group//g; s/--end-group//g' {} +
+    '';
+    overrideAttrs = _old: {
+      # nixpkgs' meson hook forces -Dauto_features=enabled, so every `auto`
+      # feature becomes required. Pin each one explicitly.
+      mesonFlags = [
+        "-Ddefault_library=static"
+        "-Ddocumentation=false"
+        "-Dgtk_doc=false"
+        "-Dman-pages=false"
+        "-Dintrospection=disabled"
+        "-Dbuild-testsuite=false"
+        "-Dbuild-examples=false"
+        "-Dfontconfig=enabled"
+        "-Dlibthai=enabled"
+        "-Dcairo=enabled"
+        "-Dfreetype=enabled"
+        "-Dxft=disabled"
+        "-Dsysprof=disabled"
+      ];
+      # The CLI utils are skipped, so the bin output is empty.
+      postFixup = ''
+        mkdir -p "$bin" 2>/dev/null || true
+        : > "$bin/.keep" 2>/dev/null || true
+      '';
+    };
+  };
+
+  gdk-pixbuf = mkUpstreamLibrary {
+    package = (pkgsCross.gdk-pixbuf.override {
+      glib = self.glib;
+      libjpeg = self.libjpeg;
+      libpng = self.libpng;
+      libtiff = self.libtiff;
+      withIntrospection = false;
+      doCheck = false;
+    }).overrideAttrs (old: {
+      # Hook is target-built here and fails on wasi; not needed for a
+      # static wasm closure. Apply before mkUpstreamLibrary appends wasixcc.
+      nativeBuildInputs = builtins.filter (x: (x.pname or x.name or "") != "make-shell-wrapper-hook") (old.nativeBuildInputs or [ ]);
+      buildInputs = builtins.filter (x: (x.pname or x.name or "") != "make-shell-wrapper-hook") (old.buildInputs or [ ]);
+    });
+    doCheck = false;
+    preBuild = ''
+      find . -name build.ninja -exec sed -i 's/--start-group//g; s/--end-group//g' {} +
+    '';
+  };
+
+  graphene = mkUpstreamLibrary {
+    package = (pkgsCross.graphene.override {
+      glib = self.glib;
+      withIntrospection = false;
+      withDocumentation = false;
+    }).overrideAttrs (old: {
+      nativeBuildInputs = builtins.filter (x: (x.pname or x.name or "") != "make-shell-wrapper-hook") (old.nativeBuildInputs or [ ]);
+      buildInputs = builtins.filter (x: (x.pname or x.name or "") != "make-shell-wrapper-hook") (old.buildInputs or [ ]);
+    });
+    doCheck = false;
+  };
+
+  libxkbcommon = mkUpstreamLibrary {
+    package = pkgsCross.libxkbcommon.override {
+      libxml2 = self.libxml2;
+      wayland = self.wayland;
+      wayland-protocols = self.wayland-protocols;
+      withWaylandTools = false;
+      libx11 = null;
+      libxcb = null;
+    };
+    doCheck = false;
+    preBuild = ''
+      find . -name build.ninja -exec sed -i 's/--start-group//g; s/--end-group//g' {} +
+    '';
+    preConfigure = ''
+      cat > "$PWD/wasix-fork.h" <<'EOF'
+      #include <sys/types.h>
+      #define fork() (-1)
+      EOF
+      export CFLAGS="-include $PWD/wasix-fork.h ''${CFLAGS:-}"
+    '';
+    overrideAttrs = _old: {
+      mesonFlags = [ "-Denable-x11=false" "-Denable-wayland=false" "-Denable-tools=false" "-Denable-docs=false" "-Ddefault_library=static" ];
+      postFixup = ''
+        mkdir -p "$doc" 2>/dev/null || true
+        : > "$doc/.keep" 2>/dev/null || true
+      '';
     };
   };
 }
