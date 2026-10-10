@@ -611,9 +611,13 @@ EOF
       libjpeg = self.libjpeg;
       libtiff = self.libtiff;
       libxml2 = self.libxml2;
-      # nativeBuildInputs are not spliced to the build machine for this
-      # package; use the x86_64 gobject-introspection (introspection is off).
-      gobject-introspection = pkgsCross.buildPackages.gobject-introspection;
+      # nativeBuildInputs are not spliced to the build machine here, and the
+      # cross gobject-introspection pulls the target gobject-introspection,
+      # which cannot even evaluate on wasi. Introspection is disabled, so a
+      # harmless stub keeps the native input list satisfied.
+      gobject-introspection = pkgsCross.runCommand "gobject-introspection-wasix-stub" { } ''
+        mkdir -p $out/bin $out/lib
+      '';
     }).overrideAttrs (old: {
       doCheck = false;
       # Drop inputs we do not use: gstreamer media, the X11 stack, Wayland
