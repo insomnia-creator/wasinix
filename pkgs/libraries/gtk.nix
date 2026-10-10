@@ -626,6 +626,18 @@ EOF
           mkdir -p $out
         '';
       };
+      # nixpkgs lists the X11 libs in buildInputs unconditionally; they drag
+      # in xorgproto/libglvnd which do not build on wasi. x11Support is off,
+      # so stub them.
+      libice = pkgsCross.runCommand "libice-wasix-stub" { } "mkdir -p $out";
+      libsm = pkgsCross.runCommand "libsm-wasix-stub" { } "mkdir -p $out";
+      libxcursor = pkgsCross.runCommand "libxcursor-wasix-stub" { } "mkdir -p $out";
+      libxdamage = pkgsCross.runCommand "libxdamage-wasix-stub" { } "mkdir -p $out";
+      libxi = pkgsCross.runCommand "libxi-wasix-stub" { } "mkdir -p $out";
+      libxrandr = pkgsCross.runCommand "libxrandr-wasix-stub" { } "mkdir -p $out";
+      libxrender = pkgsCross.runCommand "libxrender-wasix-stub" { } "mkdir -p $out";
+      libxinerama = pkgsCross.runCommand "libxinerama-wasix-stub" { } "mkdir -p $out";
+      libGL = pkgsCross.runCommand "libglvnd-wasix-stub" { } "mkdir -p $out";
       # Runtime data packages that drag in a plain wasm glib (and thus the
       # plain pcre2/zlib). Stub them for first bring-up.
       shared-mime-info = pkgsCross.runCommand "shared-mime-info-wasix-stub" { } ''
