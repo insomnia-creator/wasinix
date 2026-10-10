@@ -616,6 +616,16 @@ EOF
       librsvg = pkgsCross.runCommand "librsvg-wasix-stub" { } ''
         mkdir -p $out/include/librsvg-2.0 $out/lib/pkgconfig
       '';
+      # gstreamer media is disabled (-Dmedia-gstreamer=disabled) and its
+      # base/bad plugins pull the plain wasm pango/cairo.
+      gst_all_1 = {
+        gst-plugins-base = pkgsCross.runCommand "gst-plugins-base-wasix-stub" { } ''
+          mkdir -p $out
+        '';
+        gst-plugins-bad = pkgsCross.runCommand "gst-plugins-bad-wasix-stub" { } ''
+          mkdir -p $out
+        '';
+      };
       # nativeBuildInputs are not spliced to the build machine here, and the
       # cross gobject-introspection pulls the target gobject-introspection,
       # which cannot even evaluate on wasi. Introspection is disabled, so a
