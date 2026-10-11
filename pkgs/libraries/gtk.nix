@@ -610,7 +610,11 @@ EOF
       libpng = self.libpng;
       libjpeg = self.libjpeg;
       libtiff = self.libtiff;
-      libxml2 = self.libxml2;
+      # libxml2 is only a native tool here (xmllint for
+      # glib-compile-resources), and gettext provides msgfmt/xgettext; both
+      # must be build-machine binaries, not the wasm ones.
+      libxml2 = pkgs.buildPackages.libxml2;
+      gettext = pkgs.buildPackages.gettext;
       # librsvg pulls the plain wasm cairo, which cannot even evaluate on
       # wasi. We do not need SVG pixbuf loading for first bring-up.
       librsvg = pkgsCross.runCommand "librsvg-wasix-stub" { } ''
