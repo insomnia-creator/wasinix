@@ -33,6 +33,16 @@ let
     ar = '${pkgs.buildPackages.stdenv.cc}/bin/ar'
     strip = '${pkgs.buildPackages.stdenv.cc}/bin/strip'
   '';
+
+  # Khronos EGL headers. libepoxy and GTK4's Wayland backend include
+  # <EGL/egl.h> / <EGL/eglplatform.h>, which wasi does not provide. Use the
+  # registry headers with EGL_NO_PLATFORM_SPECIFIC_TYPES (void* natives).
+  eglRegistry = pkgs.fetchFromGitHub {
+    owner = "KhronosGroup";
+    repo = "EGL-Registry";
+    rev = "db3425b8246136faccb5e2782b5694960bd6edf1";
+    hash = "sha256-P9whusrQkDWZpwaBnroDimsxORkwNJMFrfZcwvxMbvE=";
+  };
 in
 {
   libffi = mkUpstreamLibrary {
@@ -586,6 +596,7 @@ EOF
       # installs when EGL is enabled. GLX/X11 stay off; libepoxy vendors
       # the EGL headers it needs and loads the library via dlopen.
       mesonFlags = [ "-Degl=yes" "-Dglx=no" "-Dx11=false" "-Dtests=false" ];
+      NIX_CFLAGS_COMPILE = "-DEGL_NO_PLATFORM_SPECIFIC_TYPES -I${eglRegistry}/api";
     };
   };
 
@@ -699,6 +710,9 @@ EOF
           "libepoxy"
         ])
       ) ((old.buildInputs or [ ]) ++ [ self.libepoxy ]);
+      env = (old.env or { }) // {
+        NIX_CFLAGS_COMPILE = ((old.env or { }).NIX_CFLAGS_COMPILE or "") + " -DEGL_NO_PLATFORM_SPECIFIC_TYPES -I${eglRegistry}/api";
+      };
       mesonFlags = [
         "-Dx11-backend=false"
         "-Dwayland-backend=true"
