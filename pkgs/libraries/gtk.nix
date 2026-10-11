@@ -761,6 +761,16 @@ EOF
         --replace-fail \
           "dependency('librsvg-2.0', version: ['>= 2.40.23', '< 2.41'])" \
           "dependency('librsvg-2.0', version: ['>= 2.40.23', '< 2.41'], required: false)"
+      # GTK4 also builds a shared libgtk-4; the wasm shared link trips
+      # wasm-ld (--start-group, soname). Use the static target instead.
+      python3 - <<'PY'
+      p = 'gtk/meson.build'
+      s = open(p).read()
+      start = s.index("libgtk = shared_library('gtk-4',")
+      end = s.index("\n)\n", start) + 3
+      s = s[:start] + 'libgtk = libgtk_static\n' + s[end:]
+      open(p, 'w').write(s)
+      PY
     '';
     doCheck = false;
   };
