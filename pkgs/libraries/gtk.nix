@@ -595,7 +595,7 @@ EOF
       # GTK4's Wayland backend includes <epoxy/egl.h>, which libepoxy only
       # installs when EGL is enabled. GLX/X11 stay off; libepoxy vendors
       # the EGL headers it needs and loads the library via dlopen.
-      mesonFlags = [ "-Degl=yes" "-Dglx=no" "-Dx11=false" "-Dtests=false" ];
+      mesonFlags = [ "-Degl=yes" "-Dglx=no" "-Dx11=false" "-Dtests=false" "-Ddefault_library=static" ];
       env = (old.env or { }) // {
         CFLAGS = "-DEGL_NO_PLATFORM_SPECIFIC_TYPES -I${eglRegistry}/api";
       };
