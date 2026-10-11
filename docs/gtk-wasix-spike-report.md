@@ -222,6 +222,37 @@ GTK4 4.20, Wayland-only, `GSK_RENDERER=cairo` first:
 
 Commits: Phase 1, Phase 2 and Phase 3 are each one squashed commit.
 
+## Phase 4 status (2026-10-11)
+
+The runtime lane: the **guest side of the Wayland fd bridge** (connection +
+SHM).
+
+- New `wasinix/pkgs/libraries/wawona-wayland.c`: `--wrap` shims for
+  `connect` / `sendmsg` / `recvmsg` / `poll` / `close` that route
+  libwayland's transport through the host imports (module `env`,
+  registered also as `wawona_socket`):
+  `wawona_wayland_connect`, `wawona_wayland_sendmsg`, `wawona_socket_recv`,
+  `wawona_socket_close`, `wawona_wayland_shm_create`,
+  `wawona_wayland_shm_write`, `wawona_socket_close`. Non-Wayland fds fall
+  through to the real libc calls, so the shim is inert off Relay. The host
+  returns a **synthetic** fd for the Wayland stream, so the shim keeps a
+  guest-fd to host-fd map.
+- New `wasinix/pkgs/libraries/gtk4-wawona-gdkshm.c` replaces GTK4's
+  `gdk/wayland/gdkshm.c`: the host owns the `wl_shm` file
+  (`wawona_wayland_shm_create`), the guest draws into heap memory, and GDK
+  flushes pixels to the host (`wawona_wayland_shm_write`) right before
+  `wl_surface_attach` (`_gdk_wayland_shm_surface_flush`, called from
+  `gdk_wayland_surface_attach_image`).
+- Built by `wasixWawonaWayland` and linked into gtk4 with
+  `-Wl,--wrap=...` + `-Wl,--allow-undefined`. **17/17 green.**
+
+Still open:
+- **Runtime smoke.** `hello-wasi-gui` / `wayland-shm` under Wawona Relay, to
+  prove connect + `wl_display.sync` + `xdg_wm_base` toplevel + one SHM
+  frame end to end. Needs the Relay host to execute.
+- A `libwayland-client`-backed C smoke (registry bind + `wl_shm` pool)
+  through the shim, ready to run when Relay is available.
+
 ## Repo pointers
 
 - Spike: `insomnia-creator/wasinix` branch `gtk/wasix-spike`

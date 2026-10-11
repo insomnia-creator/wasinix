@@ -80,6 +80,30 @@ let
     };
     doCheck = false;
   };
+
+  # Wawona Wasm Wayland transport (guest side of the fd bridge): --wrap shims
+  # that route libwayland's connect/sendmsg/recvmsg/poll/close through the
+  # host `wawona_wayland_*` / `wawona_socket_*` imports.
+  wasixWawonaWayland = mkUpstreamLibrary {
+    package = pkgsCross.stdenv.mkDerivation {
+      pname = "wawona-wayland";
+      version = "1";
+      dontUnpack = true;
+      buildPhase = ''
+        runHook preBuild
+        $CC -O2 -fPIC -c ${./wawona-wayland.c} -o wawona-wayland.o
+        $AR rcs libwawona-wayland.a wawona-wayland.o
+        runHook postBuild
+      '';
+      installPhase = ''
+        runHook preInstall
+        mkdir -p $out/lib
+        cp libwawona-wayland.a $out/lib/
+        runHook postInstall
+      '';
+    };
+    doCheck = false;
+  };
 in
 {
   libffi = mkUpstreamLibrary {
@@ -765,7 +789,7 @@ EOF
         CFLAGS = ((old.env or { }).CFLAGS or "") + " -DEGL_NO_PLATFORM_SPECIFIC_TYPES -I${eglRegistry}/api -I${wasixLinuxInput}/include -I${librsvgStubHeaders} -DFE_UPWARD=0x800 -DFE_DOWNWARD=0x400 -DFE_TOWARDZERO=0xc00 -include ${wasixFtwShim}";
         # The tools link the C++ harfbuzz static archive, and libepoxy /
         # wayland-client need ppoll and dl*; bring in libc++ and the compat lib.
-        LDFLAGS = ((old.env or { }).LDFLAGS or "") + " -lc++ -lc++abi -lunwind ${wasixCompat}/lib/libwasix-compat.a";
+        LDFLAGS = ((old.env or { }).LDFLAGS or "") + " -lc++ -lc++abi -lunwind ${wasixCompat}/lib/libwasix-compat.a ${wasixWawonaWayland}/lib/libwawona-wayland.a -Wl,--wrap=connect -Wl,--wrap=sendmsg -Wl,--wrap=recvmsg -Wl,--wrap=poll -Wl,--wrap=close -Wl,--allow-undefined";
       };
       mesonFlags = [
         "-Dx11-backend=false"
@@ -802,6 +826,8 @@ EOF
         --replace-fail \
           "dependency('librsvg-2.0', version: ['>= 2.40.23', '< 2.41'])" \
           "dependency('librsvg-2.0', version: ['>= 2.40.23', '< 2.41'], required: false)"
+      # Wawona SHM: the host owns the pool and the guest flushes pixels.
+      cp ${./gtk4-wawona-gdkshm.c} gdk/wayland/gdkshm.c
       # GTK4 also builds a shared libgtk-4; the wasm shared link trips
       # wasm-ld (--start-group, soname). Use the static target instead.
       python3 - <<'PY'
@@ -810,6 +836,23 @@ EOF
       start = s.index("libgtk = shared_library('gtk-4',")
       end = s.index("\n)\n", start) + 3
       s = s[:start] + 'libgtk = libgtk_static\n' + s[end:]
+      open(p, 'w').write(s)
+
+      p = 'gdk/wayland/gdkshm-private.h'
+      s = open(p).read()
+      s = s.replace(
+        'struct wl_buffer *_gdk_wayland_shm_texture_get_wl_buffer',
+        'void _gdk_wayland_shm_surface_flush (cairo_surface_t *surface);\n'
+        'struct wl_buffer *_gdk_wayland_shm_texture_get_wl_buffer')
+      open(p, 'w').write(s)
+
+      p = 'gdk/wayland/gdksurface-wayland.c'
+      s = open(p).read()
+      s = s.replace(
+        '  g_assert (_gdk_wayland_is_shm_surface (cairo_surface));',
+        '  g_assert (_gdk_wayland_is_shm_surface (cairo_surface));\n'
+        '\n'
+        '  _gdk_wayland_shm_surface_flush (cairo_surface);')
       open(p, 'w').write(s)
       PY
     '';
