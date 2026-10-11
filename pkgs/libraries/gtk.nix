@@ -50,6 +50,10 @@ let
     mkdir -p $out/include/linux
     cp ${./wasix-linux-input.h} $out/include/linux/input.h
   '';
+
+  # Inert librsvg headers so GTK4's SVG texture path compiles without the
+  # real Rust librsvg; the functions are static inline no-ops.
+  librsvgStubHeaders = pkgs.writeTextDir "librsvg/rsvg.h" (builtins.readFile ./librsvg-stub.h);
 in
 {
   libffi = mkUpstreamLibrary {
@@ -720,7 +724,7 @@ EOF
         ])
       ) ((old.buildInputs or [ ]) ++ [ self.libepoxy ]);
       env = (old.env or { }) // {
-        CFLAGS = ((old.env or { }).CFLAGS or "") + " -DEGL_NO_PLATFORM_SPECIFIC_TYPES -I${eglRegistry}/api -I${wasixLinuxInput}/include";
+        CFLAGS = ((old.env or { }).CFLAGS or "") + " -DEGL_NO_PLATFORM_SPECIFIC_TYPES -I${eglRegistry}/api -I${wasixLinuxInput}/include -I${librsvgStubHeaders}";
       };
       mesonFlags = [
         "-Dx11-backend=false"
