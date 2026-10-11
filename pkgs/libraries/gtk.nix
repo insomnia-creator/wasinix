@@ -657,7 +657,11 @@ EOF
       doCheck = false;
       # The setup hook is target-built and pulls the target bash, which does
       # not configure on wasi. Not needed for a static wasm closure.
-      nativeBuildInputs = builtins.filter (x: (x.pname or x.name or "") != "make-shell-wrapper-hook") (old.nativeBuildInputs or [ ]);
+      nativeBuildInputs =
+        builtins.filter (x: (x.pname or x.name or "") != "make-shell-wrapper-hook") (old.nativeBuildInputs or [ ])
+        # gtk4 needs the build-machine glib tools (glib-compile-resources,
+        # glib-mkenums, ...); the cross glib's bin is not on PATH.
+        ++ [ pkgs.buildPackages.glib ];
       # Drop inputs we do not use: gstreamer media, the X11 stack, Wayland
       # libGL, and the gdk-pixbuf loaders (librsvg/isocodes/libtiff/libjpeg).
       # Re-add the closure libepoxy (self), not the plain wasm one.
