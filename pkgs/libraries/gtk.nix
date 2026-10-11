@@ -724,7 +724,7 @@ EOF
         ])
       ) ((old.buildInputs or [ ]) ++ [ self.libepoxy ]);
       env = (old.env or { }) // {
-        CFLAGS = ((old.env or { }).CFLAGS or "") + " -DEGL_NO_PLATFORM_SPECIFIC_TYPES -I${eglRegistry}/api -I${wasixLinuxInput}/include -I${librsvgStubHeaders}";
+        CFLAGS = ((old.env or { }).CFLAGS or "") + " -DEGL_NO_PLATFORM_SPECIFIC_TYPES -I${eglRegistry}/api -I${wasixLinuxInput}/include -I${librsvgStubHeaders} -DFE_UPWARD=0x800 -DFE_DOWNWARD=0x400 -DFE_TOWARDZERO=0xc00";
       };
       mesonFlags = [
         "-Dx11-backend=false"
