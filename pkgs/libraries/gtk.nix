@@ -597,7 +597,7 @@ EOF
       # the EGL headers it needs and loads the library via dlopen.
       mesonFlags = [ "-Degl=yes" "-Dglx=no" "-Dx11=false" "-Dtests=false" ];
       env = (old.env or { }) // {
-        NIX_CFLAGS_COMPILE = "-DEGL_NO_PLATFORM_SPECIFIC_TYPES -I${eglRegistry}/api";
+        CFLAGS = "-DEGL_NO_PLATFORM_SPECIFIC_TYPES -I${eglRegistry}/api";
       };
     };
   };
@@ -713,7 +713,7 @@ EOF
         ])
       ) ((old.buildInputs or [ ]) ++ [ self.libepoxy ]);
       env = (old.env or { }) // {
-        NIX_CFLAGS_COMPILE = ((old.env or { }).NIX_CFLAGS_COMPILE or "") + " -DEGL_NO_PLATFORM_SPECIFIC_TYPES -I${eglRegistry}/api";
+        CFLAGS = ((old.env or { }).CFLAGS or "") + " -DEGL_NO_PLATFORM_SPECIFIC_TYPES -I${eglRegistry}/api";
       };
       mesonFlags = [
         "-Dx11-backend=false"
