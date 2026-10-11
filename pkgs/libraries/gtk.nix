@@ -43,6 +43,13 @@ let
     rev = "db3425b8246136faccb5e2782b5694960bd6edf1";
     hash = "sha256-P9whusrQkDWZpwaBnroDimsxORkwNJMFrfZcwvxMbvE=";
   };
+
+  # wasi has no <linux/input.h>; GTK4's Wayland backend needs the button
+  # codes from it.
+  wasixLinuxInput = pkgs.runCommand "wasix-linux-input" { } ''
+    mkdir -p $out/include/linux
+    cp ${./wasix-linux-input.h} $out/include/linux/input.h
+  '';
 in
 {
   libffi = mkUpstreamLibrary {
@@ -713,7 +720,7 @@ EOF
         ])
       ) ((old.buildInputs or [ ]) ++ [ self.libepoxy ]);
       env = (old.env or { }) // {
-        CFLAGS = ((old.env or { }).CFLAGS or "") + " -DEGL_NO_PLATFORM_SPECIFIC_TYPES -I${eglRegistry}/api";
+        CFLAGS = ((old.env or { }).CFLAGS or "") + " -DEGL_NO_PLATFORM_SPECIFIC_TYPES -I${eglRegistry}/api -I${wasixLinuxInput}/include";
       };
       mesonFlags = [
         "-Dx11-backend=false"
