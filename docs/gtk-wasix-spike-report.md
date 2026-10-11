@@ -10,7 +10,8 @@ Prove the WASIX lane for GTK3/4: build the GTK dependency closure with
 `wasixcc` + the WASIX sysroot so GTK can later ship as a `wpm` package on
 `repo.wawona.io/wasm` and run under Wawona Relay.
 
-**Status: Phase-1 closure is GREEN.** All six spike nodes build with wasixcc.
+**Status: Phases 1-3 GREEN.** GTK4 (Wayland-only, cairo first) now builds
+with wasixcc, along with its full dependency closure.
 
 ## Result
 
@@ -187,6 +188,39 @@ one-shot retry for the wasixcc flake.
 
 Commits: Phase 1 is one squashed commit `02d71b1`; Phase 2 is one squashed
 commit on top. Deferred to the GPU phase: `libepoxy` (no EGL/GL on wasm).
+
+## Phase 3 status (2026-10-11)
+
+Added `libepoxy` and `gtk4` to the closure and CI matrix. **All 17 nodes
+green.**
+
+GTK4 4.20, Wayland-only, `GSK_RENDERER=cairo` first:
+
+- **libepoxy** is required by GSK's GL/NGL renderer (there is no meson option
+  to drop it). Built with EGL on, GLX/X11 off, static. Vendored the Khronos
+  EGL headers (EGL-Registry) since wasi has none;
+  `-DEGL_NO_PLATFORM_SPECIFIC_TYPES` gives `void *` natives.
+- **gtk4 knobs**: `x11-backend=false`, `wayland-backend=true`,
+  `vulkan/tracker/cups/broadway/introspection/documentation` off,
+  `media-gstreamer=disabled`, `f16c=disabled`, `default_library=static`.
+- **Build-machine tools**: native `glib` (glib-compile-resources), native
+  `libxml2` (xmllint), native `gettext` (msgfmt), native `makeWrapper`;
+  `gobject-introspection` stubbed (introspection off).
+- **Stubbed/thinned inputs** that pull plain-wasm subgraphs or X11:
+  `librsvg`, `gst_all_1`, `shared-mime-info`, `gsettings-desktop-schemas`,
+  `libice`/`libsm`/`libX*`/`libGL`; `isocodes` stays.
+- **Patched `gtk/meson.build`**: the unused `rsvg_dep` fallback is
+  `required: false`; `libgtk` aliases the static target (the shared
+  `libgtk-4` link trips wasm-ld).
+- **Compat shims**: `<linux/input.h>` (BTN_* codes), inert `librsvg/rsvg.h`
+  (static-inline no-ops), inert `ftw()`,
+  `FE_UPWARD`/`FE_DOWNWARD`/`FE_TOWARDZERO`, and a small wasm
+  `libwasix-compat.a` providing `ppoll` (wayland) and
+  `dlopen`/`dlsym`/`dlerror` (libepoxy).
+- gtk4 links only as a static lib; its CLI tools build, but the shell
+  `wrapProgram` fixups are skipped.
+
+Commits: Phase 1, Phase 2 and Phase 3 are each one squashed commit.
 
 ## Repo pointers
 

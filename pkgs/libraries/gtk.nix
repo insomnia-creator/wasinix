@@ -33,6 +33,53 @@ let
     ar = '${pkgs.buildPackages.stdenv.cc}/bin/ar'
     strip = '${pkgs.buildPackages.stdenv.cc}/bin/strip'
   '';
+
+  # Khronos EGL headers. libepoxy and GTK4's Wayland backend include
+  # <EGL/egl.h> / <EGL/eglplatform.h>, which wasi does not provide. Use the
+  # registry headers with EGL_NO_PLATFORM_SPECIFIC_TYPES (void* natives).
+  eglRegistry = pkgs.fetchFromGitHub {
+    owner = "KhronosGroup";
+    repo = "EGL-Registry";
+    rev = "db3425b8246136faccb5e2782b5694960bd6edf1";
+    hash = "sha256-P9whusrQkDWZpwaBnroDimsxORkwNJMFrfZcwvxMbvE=";
+  };
+
+  # wasi has no <linux/input.h>; GTK4's Wayland backend needs the button
+  # codes from it.
+  wasixLinuxInput = pkgs.runCommand "wasix-linux-input" { } ''
+    mkdir -p $out/include/linux
+    cp ${./wasix-linux-input.h} $out/include/linux/input.h
+  '';
+
+  # Inert librsvg headers so GTK4's SVG texture path compiles without the
+  # real Rust librsvg; the functions are static inline no-ops.
+  librsvgStubHeaders = pkgs.writeTextDir "librsvg/rsvg.h" (builtins.readFile ./librsvg-stub.h);
+
+  # wasi lacks ftw(); gtk4-update-icon-cache needs it.
+  wasixFtwShim = pkgs.writeText "wasix-ftw.h" (builtins.readFile ./wasix-ftw.h);
+
+  # A small wasm compat library: ppoll (wayland) and dlopen/dlsym/dlerror
+  # (libepoxy). Built with the wasix toolchain.
+  wasixCompat = mkUpstreamLibrary {
+    package = pkgsCross.stdenv.mkDerivation {
+      pname = "wasix-compat";
+      version = "1";
+      dontUnpack = true;
+      buildPhase = ''
+        runHook preBuild
+        $CC -O2 -fPIC -c ${./wasix-compat.c} -o wasix-compat.o
+        $AR rcs libwasix-compat.a wasix-compat.o
+        runHook postBuild
+      '';
+      installPhase = ''
+        runHook preInstall
+        mkdir -p $out/lib
+        cp libwasix-compat.a $out/lib/
+        runHook postInstall
+      '';
+    };
+    doCheck = false;
+  };
 in
 {
   libffi = mkUpstreamLibrary {
@@ -571,5 +618,201 @@ EOF
         : > "$doc/.keep" 2>/dev/null || true
       '';
     };
+  };
+
+  # libepoxy is pulled in by GTK4's GSK GL/NGL renderer even though we only
+  # intend to use GSK_RENDERER=cairo. Build it without GLX/EGL/X11: it vendors
+  # its own Khronos headers and uses wasix's dlopen stub for the runtime GL.
+  libepoxy = mkUpstreamLibrary {
+    package = pkgsCross.libepoxy.override {
+      x11Support = false;
+    };
+    doCheck = false;
+    overrideAttrs = old: {
+      # GTK4's Wayland backend includes <epoxy/egl.h>, which libepoxy only
+      # installs when EGL is enabled. GLX/X11 stay off; libepoxy vendors
+      # the EGL headers it needs and loads the library via dlopen.
+      mesonFlags = [ "-Degl=yes" "-Dglx=no" "-Dx11=false" "-Dtests=false" "-Ddefault_library=static" ];
+      env = (old.env or { }) // {
+        CFLAGS = "-DEGL_NO_PLATFORM_SPECIFIC_TYPES -I${eglRegistry}/api";
+      };
+    };
+  };
+
+  # GTK4, Wayland-only, cairo first. There is no meson option to drop the
+  # GL/NGL renderer, so libepoxy is still required; GSK_RENDERER=cairo is a
+  # runtime choice.
+  gtk4 = mkUpstreamLibrary {
+    package = (pkgsCross.gtk4.override {
+      x11Support = false;
+      waylandSupport = true;
+      vulkanSupport = false;
+      trackerSupport = false;
+      cupsSupport = false;
+      broadwaySupport = false;
+      xineramaSupport = false;
+      compileSchemas = false;
+      glib = self.glib;
+      cairo = self.cairo;
+      pango = self.pango;
+      gdk-pixbuf = self.gdk-pixbuf;
+      graphene = self.graphene;
+      fribidi = self.fribidi;
+      harfbuzz = self.harfbuzz;
+      libepoxy = self.libepoxy;
+      libxkbcommon = self.libxkbcommon;
+      wayland = self.wayland;
+      wayland-protocols = self.wayland-protocols;
+      libpng = self.libpng;
+      libjpeg = self.libjpeg;
+      libtiff = self.libtiff;
+      # libxml2 is only a native tool here (xmllint for
+      # glib-compile-resources), and gettext provides msgfmt/xgettext; both
+      # must be build-machine binaries, not the wasm ones.
+      libxml2 = pkgs.buildPackages.libxml2;
+      gettext = pkgs.buildPackages.gettext;
+      # wrapProgram comes from makeWrapper's setup hook; use the native one.
+      makeWrapper = pkgs.buildPackages.makeWrapper;
+      # librsvg pulls the plain wasm cairo, which cannot even evaluate on
+      # wasi. We do not need SVG pixbuf loading for first bring-up.
+      librsvg = pkgsCross.runCommand "librsvg-wasix-stub" { } ''
+        mkdir -p $out/include/librsvg-2.0 $out/lib/pkgconfig
+      '';
+      # gstreamer media is disabled (-Dmedia-gstreamer=disabled) and its
+      # base/bad plugins pull the plain wasm pango/cairo.
+      gst_all_1 = {
+        gst-plugins-base = pkgsCross.runCommand "gst-plugins-base-wasix-stub" { } ''
+          mkdir -p $out
+        '';
+        gst-plugins-bad = pkgsCross.runCommand "gst-plugins-bad-wasix-stub" { } ''
+          mkdir -p $out
+        '';
+      };
+      # nixpkgs lists the X11 libs in buildInputs unconditionally; they drag
+      # in xorgproto/libglvnd which do not build on wasi. x11Support is off,
+      # so stub them.
+      libice = pkgsCross.runCommand "libice-wasix-stub" { } "mkdir -p $out";
+      libsm = pkgsCross.runCommand "libsm-wasix-stub" { } "mkdir -p $out";
+      libxcursor = pkgsCross.runCommand "libxcursor-wasix-stub" { } "mkdir -p $out";
+      libxdamage = pkgsCross.runCommand "libxdamage-wasix-stub" { } "mkdir -p $out";
+      libxi = pkgsCross.runCommand "libxi-wasix-stub" { } "mkdir -p $out";
+      libxrandr = pkgsCross.runCommand "libxrandr-wasix-stub" { } "mkdir -p $out";
+      libxrender = pkgsCross.runCommand "libxrender-wasix-stub" { } "mkdir -p $out";
+      libxinerama = pkgsCross.runCommand "libxinerama-wasix-stub" { } "mkdir -p $out";
+      libGL = pkgsCross.runCommand "libglvnd-wasix-stub" { } "mkdir -p $out";
+      # Runtime data packages that drag in a plain wasm glib (and thus the
+      # plain pcre2/zlib). Stub them for first bring-up.
+      shared-mime-info = pkgsCross.runCommand "shared-mime-info-wasix-stub" { } ''
+        mkdir -p $out/share
+      '';
+      gsettings-desktop-schemas = pkgsCross.runCommand "gsettings-desktop-schemas-wasix-stub" { } ''
+        mkdir -p $out/share/glib-2.0/schemas
+      '';
+      # nativeBuildInputs are not spliced to the build machine here, and the
+      # cross gobject-introspection pulls the target gobject-introspection,
+      # which cannot even evaluate on wasi. Introspection is disabled, so a
+      # harmless stub keeps the native input list satisfied.
+      gobject-introspection = pkgsCross.runCommand "gobject-introspection-wasix-stub" { } ''
+        mkdir -p $out/bin $out/lib
+      '';
+    }).overrideAttrs (old: {
+      doCheck = false;
+      # The tools are wasm; wrapping them with shell scripts is meaningless,
+      # and the demos are not built. Skip nixpkgs' wrapProgram postInstall /
+      # postFixup.
+      postInstall = "";
+      postFixup = "";
+      preBuild = ''
+        # wasm-ld has no --start-group/--end-group.
+        find . -name build.ninja -exec sed -i \
+          's/-Wl,--start-group//g; s/-Wl,--end-group//g; s/--start-group//g; s/--end-group//g' {} +
+      '';
+      # The setup hook is target-built and pulls the target bash, which does
+      # not configure on wasi. Not needed for a static wasm closure.
+      nativeBuildInputs =
+        builtins.filter (x: (x.pname or x.name or "") != "make-shell-wrapper-hook") (old.nativeBuildInputs or [ ])
+        # gtk4 needs the build-machine glib tools (glib-compile-resources,
+        # glib-mkenums, ...); the cross glib's bin is not on PATH.
+        ++ [ pkgs.buildPackages.glib ];
+      # Drop inputs we do not use: gstreamer media, the X11 stack, Wayland
+      # libGL, and the gdk-pixbuf loaders (librsvg/isocodes/libtiff/libjpeg).
+      # Re-add the closure libepoxy (self), not the plain wasm one.
+      buildInputs = builtins.filter (
+        input:
+        let
+          name = input.pname or input.name or "";
+        in
+        !(builtins.elem name [
+          "gst-plugins-base"
+          "gst-plugins-bad"
+          "libice"
+          "libsm"
+          "libxcursor"
+          "libxdamage"
+          "libxi"
+          "libxrandr"
+          "libxrender"
+          "librsvg"
+          "isocodes"
+          "libtiff"
+          "libjpeg"
+          "libGL"
+          "libglvnd"
+          "libepoxy"
+        ])
+      ) ((old.buildInputs or [ ]) ++ [ self.libepoxy ]);
+      env = (old.env or { }) // {
+        CFLAGS = ((old.env or { }).CFLAGS or "") + " -DEGL_NO_PLATFORM_SPECIFIC_TYPES -I${eglRegistry}/api -I${wasixLinuxInput}/include -I${librsvgStubHeaders} -DFE_UPWARD=0x800 -DFE_DOWNWARD=0x400 -DFE_TOWARDZERO=0xc00 -include ${wasixFtwShim}";
+        # The tools link the C++ harfbuzz static archive, and libepoxy /
+        # wayland-client need ppoll and dl*; bring in libc++ and the compat lib.
+        LDFLAGS = ((old.env or { }).LDFLAGS or "") + " -lc++ -lc++abi -lunwind ${wasixCompat}/lib/libwasix-compat.a";
+      };
+      mesonFlags = [
+        "-Dx11-backend=false"
+        "-Dwayland-backend=true"
+        "-Dbroadway-backend=false"
+        "-Dwin32-backend=false"
+        "-Dmacos-backend=false"
+        "-Dandroid-backend=false"
+        "-Dmedia-gstreamer=disabled"
+        "-Dprint-cups=disabled"
+        "-Dprint-cpdb=disabled"
+        "-Dvulkan=disabled"
+        "-Dcloudproviders=disabled"
+        "-Dsysprof=disabled"
+        "-Dtracker=disabled"
+        "-Dcolord=disabled"
+        "-Df16c=disabled"
+        "-Daccesskit=disabled"
+        "-Dintrospection=disabled"
+        "-Ddocumentation=false"
+        "-Dman-pages=false"
+        "-Dbuild-demos=false"
+        "-Dbuild-testsuite=false"
+        "-Dbuild-examples=false"
+        "-Dbuild-tests=false"
+        "-Ddefault_library=static"
+      ];
+    });
+    postPatch = ''
+      # rsvg_dep is defined but never used; the old-version fallback is
+      # required, so meson tries to download the librsvg wrap. Make it
+      # optional so configure succeeds without librsvg.
+      substituteInPlace meson.build \
+        --replace-fail \
+          "dependency('librsvg-2.0', version: ['>= 2.40.23', '< 2.41'])" \
+          "dependency('librsvg-2.0', version: ['>= 2.40.23', '< 2.41'], required: false)"
+      # GTK4 also builds a shared libgtk-4; the wasm shared link trips
+      # wasm-ld (--start-group, soname). Use the static target instead.
+      python3 - <<'PY'
+      p = 'gtk/meson.build'
+      s = open(p).read()
+      start = s.index("libgtk = shared_library('gtk-4',")
+      end = s.index("\n)\n", start) + 3
+      s = s[:start] + 'libgtk = libgtk_static\n' + s[end:]
+      open(p, 'w').write(s)
+      PY
+    '';
+    doCheck = false;
   };
 }
